@@ -1,4 +1,5 @@
-use std::{net::UdpSocket, vec};
+use bytes::Buf;
+use std::{env, io::Error, io::ErrorKind, net::UdpSocket, vec};
 
 use rand::Rng;
 
@@ -37,7 +38,7 @@ struct Answer {
     name: DomainName,
     rtype: u16,
     class: u16,
-    ttl: u16,
+    ttl: u32,
     rdlength: u16,
     rdata: Vec<u16>,
 }
@@ -57,7 +58,9 @@ impl Header {
 
         let id = rng.random();
 
-        let flags = 0;
+        let mut flags = 0;
+
+        flags |= 1 << 8; // RD (recursion desired)
 
         let qdcount = 1; // 1 question
 
@@ -83,6 +86,24 @@ impl Header {
         write_u16(buf, self.nscount);
         write_u16(buf, self.arcount);
     }
+
+    fn from_bytes(buf: &mut &[u8]) -> Self {
+        let id = buf.get_u16();
+        let flags = buf.get_u16();
+        let qdcount = buf.get_u16();
+        let ancount = buf.get_u16();
+        let nscount = buf.get_u16();
+        let arcount = buf.get_u16();
+
+        Header {
+            id,
+            flags,
+            qdcount,
+            ancount,
+            nscount,
+            arcount,
+        }
+    }
 }
 
 impl DomainName {
@@ -106,6 +127,7 @@ impl Question {
         let qname = DomainName::from_str(domain);
         let qtype = 1; // Query A
         let qclass = 1; // Class IN (Internet)
+
         Question {
             qname,
             qtype,
@@ -118,6 +140,90 @@ impl Question {
 
         write_u16(buf, self.qtype);
         write_u16(buf, self.qclass);
+    }
+
+    fn from_bytes(buf: &mut &[u8]) -> Self {
+        let mut name = String::new();
+
+        loop {
+            let read = buf.get_u8();
+
+            if read == 0 {
+                break;
+            }
+
+            for _ in 0..read {
+                let c = buf.get_u8();
+
+                name.push(c as char);
+            }
+
+            name.push('.');
+        }
+
+        let qtype = buf.get_u16();
+
+        let qclass = buf.get_u16();
+
+        Self {
+            qname: DomainName::from_str(&name),
+            qtype,
+            qclass,
+        }
+    }
+}
+
+impl Answer {
+    fn from_bytes(buf: &mut &[u8]) -> Self {
+        let mut name = String::new();
+
+        loop {
+            let read = buf.get_u8();
+
+            let comp_bits = read >> 6 & 0b11;
+            if comp_bits != 0 {
+                let offset = read & 0x3F;
+                let read = buf.get_u8();
+                break;
+            }
+
+            let len = read & 0x3F;
+            if len == 0 {
+                break;
+            }
+
+            for _ in 0..len {
+                let c = buf.get_u8();
+
+                name.push(c as char);
+            }
+
+            name.push('.');
+        }
+
+        let rtype = buf.get_u16();
+        let class = buf.get_u16();
+        let ttl = buf.get_u32();
+        let rdlength = buf.get_u16();
+
+        let mut address = Vec::new();
+
+        for _ in 0..rdlength {
+            address.push(buf.get_u8());
+        }
+
+        println!("{:?}", address);
+
+        let rdata = vec![];
+
+        Self {
+            name: DomainName::from_str(&name),
+            rtype,
+            class,
+            ttl,
+            rdlength,
+            rdata,
+        }
     }
 }
 
@@ -144,22 +250,48 @@ impl Message {
 
         buf
     }
+
+    fn from_bytes(buf: &mut &[u8]) -> Self {
+        let header = Header::from_bytes(buf);
+
+        let mut question = vec![];
+        for _ in 0..header.qdcount {
+            question.push(Question::from_bytes(buf));
+        }
+
+        let mut answer = vec![];
+        for _ in 0..header.ancount {
+            answer.push(Answer::from_bytes(buf));
+        }
+
+        Message {
+            header,
+            question,
+            answer,
+            authority: vec![],
+            additional: vec![],
+        }
+    }
 }
 
 fn main() -> std::io::Result<()> {
-    let query = Message::create_query("tomase.pt");
-    println!("{:#?}", query);
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 2 {
+        return Err(Error::new(ErrorKind::Other, "Not enough arguments"));
+    }
 
-    let packet = query.to_bytes();
+    let packet = Message::create_query(args.get(1).unwrap()).to_bytes();
 
     let socket = UdpSocket::bind("0.0.0.0:0")?;
 
-    socket.send_to(&packet, "1.1.1.1:53")?;
+    socket.send_to(&packet, "8.8.8.8:53")?;
 
     let mut buf = [0u8; 512];
-    let (len, src) = socket.recv_from(&mut buf)?;
+    let (len, _) = socket.recv_from(&mut buf)?;
 
-    println!("{:?}, {}, {}", buf, len, src);
+    let mut data = &buf[..len];
+
+    Message::from_bytes(&mut data);
 
     Ok(())
 }
