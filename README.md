@@ -1,3 +1,10 @@
-# Tomscale
+# DNS Client
 
-Simple VPN written in Rust
+Simple DNS Client written in Rust
+
+## Usage
+
+```bash
+cargo run <domain> <TYPE> <CLASS>
+```
+

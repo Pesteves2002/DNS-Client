@@ -396,7 +396,7 @@ impl Message {
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 4 {
-        return Err(Error::other("Not enough arguments"));
+        return Err(Error::other("usage: cargo run <domain> <TYPE> <CLASS>"));
     }
 
     let domain = args.get(1).unwrap();
