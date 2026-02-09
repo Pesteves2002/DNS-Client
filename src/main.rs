@@ -1,5 +1,5 @@
 use bytes::Buf;
-use std::{env, io::Error, net::UdpSocket, vec};
+use std::{collections::HashMap, env, io::Error, net::UdpSocket, vec};
 
 use rand::Rng;
 
@@ -17,7 +17,7 @@ struct Header {
     arcount: u16,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct DomainName {
     labels: Vec<String>,
 }
@@ -232,8 +232,10 @@ impl Question {
         self.qclass.to_bytes(buf);
     }
 
-    fn from_bytes(buf: &mut &[u8]) -> Self {
+    fn from_bytes(buf: &mut &[u8], len: usize, labels: &mut HashMap<usize, DomainName>) -> Self {
         let mut name = String::new();
+
+        let index = len - buf.remaining();
 
         loop {
             let read = buf.get_u8();
@@ -251,12 +253,15 @@ impl Question {
             name.push('.');
         }
 
+        let domain_name = DomainName::from_str(&name);
+        labels.insert(index, domain_name.clone());
+
         let qtype = buf.get_u16();
 
         let qclass = buf.get_u16();
 
         Self {
-            qname: DomainName::from_str(&name),
+            qname: domain_name,
             qtype: QType::from_u16(qtype).unwrap(),
             qclass: QClass::from_u16(qclass).unwrap(),
         }
@@ -264,8 +269,11 @@ impl Question {
 }
 
 impl Answer {
-    fn from_bytes(buf: &mut &[u8]) -> Self {
+    fn from_bytes(buf: &mut &[u8], len: usize, labels: &mut HashMap<usize, DomainName>) -> Self {
         let mut name = String::new();
+        let mut domain_name = None;
+
+        let idx = len - buf.len();
 
         loop {
             let read = buf.get_u8();
@@ -274,6 +282,12 @@ impl Answer {
             if comp_bits != 0 {
                 let offset = read & 0x3F;
                 let read = buf.get_u8();
+
+                let full_offset = ((offset as u16) << 8 | read as u16) as usize;
+                if let Some(label) = labels.get(&full_offset) {
+                    domain_name = Some(label.clone());
+                }
+
                 break;
             }
 
@@ -291,6 +305,12 @@ impl Answer {
             name.push('.');
         }
 
+        if domain_name.is_none() {
+            let domain = DomainName::from_str(&name);
+            labels.insert(idx, domain.clone());
+            domain_name = Some(domain);
+        }
+
         let rtype = buf.get_u16();
         let class = buf.get_u16();
         let ttl = buf.get_u32();
@@ -303,7 +323,7 @@ impl Answer {
         }
 
         Self {
-            name: DomainName::from_str(&name),
+            name: domain_name.unwrap(),
             rtype: QType::from_u16(rtype).unwrap(),
             class: QClass::from_u16(class).unwrap(),
             ttl,
@@ -337,26 +357,30 @@ impl Message {
     }
 
     fn from_bytes(buf: &mut &[u8]) -> Self {
+        let len = buf.remaining();
+
         let header = Header::from_bytes(buf);
+
+        let mut labels: HashMap<usize, DomainName> = HashMap::new();
 
         let mut question = vec![];
         for _ in 0..header.qdcount {
-            question.push(Question::from_bytes(buf));
+            question.push(Question::from_bytes(buf, len, &mut labels));
         }
 
         let mut answer = vec![];
         for _ in 0..header.ancount {
-            answer.push(Answer::from_bytes(buf));
+            answer.push(Answer::from_bytes(buf, len, &mut labels));
         }
 
         let mut authority = vec![];
         for _ in 0..header.nscount {
-            authority.push(Answer::from_bytes(buf));
+            authority.push(Answer::from_bytes(buf, len, &mut labels));
         }
 
         let mut additional = vec![];
         for _ in 0..header.nscount {
-            additional.push(Answer::from_bytes(buf));
+            additional.push(Answer::from_bytes(buf, len, &mut labels));
         }
 
         Message {
