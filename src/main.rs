@@ -1,13 +1,9 @@
 use bytes::Buf;
-use std::{env, io::Error, io::ErrorKind, net::UdpSocket, vec};
+use std::{env, io::Error, net::UdpSocket, vec};
 
 use rand::Rng;
 
 fn write_u16(buf: &mut Vec<u8>, v: u16) {
-    buf.extend_from_slice(&v.to_be_bytes());
-}
-
-fn write_u32(buf: &mut Vec<u8>, v: u32) {
     buf.extend_from_slice(&v.to_be_bytes());
 }
 
@@ -26,21 +22,47 @@ struct DomainName {
     labels: Vec<String>,
 }
 
+#[repr(u16)]
+#[derive(Debug, Clone, Copy)]
+pub enum QType {
+    A = 1,
+    NS = 2,
+    CNAME = 5,
+    SOA = 6,
+    PTR = 12,
+    MX = 15,
+    TXT = 16,
+    AAAA = 28,
+    SRV = 33,
+    OPT = 41,
+    CAA = 257,
+}
+
+#[repr(u16)]
+#[derive(Debug, Clone, Copy)]
+pub enum QClass {
+    IN = 1,
+    CH = 3,
+    HS = 4,
+    NONE = 254,
+    ANY = 255,
+}
+
 #[derive(Debug)]
 struct Question {
     qname: DomainName,
-    qtype: u16,
-    qclass: u16,
+    qtype: QType,
+    qclass: QClass,
 }
 
 #[derive(Debug)]
 struct Answer {
     name: DomainName,
-    rtype: u16,
-    class: u16,
+    rtype: QType,
+    class: QClass,
     ttl: u32,
     rdlength: u16,
-    rdata: Vec<u16>,
+    rdata: Vec<u8>,
 }
 
 #[derive(Debug)]
@@ -122,11 +144,79 @@ impl DomainName {
     }
 }
 
+impl QType {
+    fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "A" => Some(Self::A),
+            "NS" => Some(Self::NS),
+            "CNAME" => Some(Self::CNAME),
+            "SOA" => Some(Self::SOA),
+            "PTR" => Some(Self::PTR),
+            "MX" => Some(Self::MX),
+            "TXT" => Some(Self::TXT),
+            "AAAA" => Some(Self::AAAA),
+            "SRV" => Some(Self::SRV),
+            "OPT" => Some(Self::OPT),
+            "CAA" => Some(Self::CAA),
+            _ => None,
+        }
+    }
+
+    fn from_u16(value: u16) -> Option<Self> {
+        match value {
+            1 => Some(Self::A),
+            2 => Some(Self::NS),
+            5 => Some(Self::CNAME),
+            6 => Some(Self::SOA),
+            12 => Some(Self::PTR),
+            15 => Some(Self::MX),
+            16 => Some(Self::TXT),
+            28 => Some(Self::AAAA),
+            33 => Some(Self::SRV),
+            41 => Some(Self::OPT),
+            257 => Some(Self::CAA),
+            _ => None,
+        }
+    }
+
+    fn to_bytes(self, buf: &mut Vec<u8>) {
+        write_u16(buf, self as u16);
+    }
+}
+
+impl QClass {
+    fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "IN" => Some(Self::IN),
+            "CH" => Some(Self::CH),
+            "HS" => Some(Self::HS),
+            "NONE" => Some(Self::NONE),
+            "ANY" => Some(Self::ANY),
+            _ => None,
+        }
+    }
+
+    fn from_u16(value: u16) -> Option<Self> {
+        match value {
+            1 => Some(Self::IN),
+            3 => Some(Self::CH),
+            4 => Some(Self::HS),
+            254 => Some(Self::NONE),
+            255 => Some(Self::ANY),
+            _ => None,
+        }
+    }
+
+    fn to_bytes(self, buf: &mut Vec<u8>) {
+        write_u16(buf, self as u16);
+    }
+}
+
 impl Question {
-    fn create_query_question(domain: &str) -> Self {
+    fn create_query_question(domain: &str, typ: &str, class: &str) -> Self {
         let qname = DomainName::from_str(domain);
-        let qtype = 1; // Query A
-        let qclass = 1; // Class IN (Internet)
+        let qtype = QType::from_str(typ).unwrap();
+        let qclass = QClass::from_str(class).unwrap();
 
         Question {
             qname,
@@ -138,8 +228,8 @@ impl Question {
     fn to_bytes(&self, buf: &mut Vec<u8>) {
         self.qname.to_bytes(buf);
 
-        write_u16(buf, self.qtype);
-        write_u16(buf, self.qclass);
+        self.qtype.to_bytes(buf);
+        self.qclass.to_bytes(buf);
     }
 
     fn from_bytes(buf: &mut &[u8]) -> Self {
@@ -167,8 +257,8 @@ impl Question {
 
         Self {
             qname: DomainName::from_str(&name),
-            qtype,
-            qclass,
+            qtype: QType::from_u16(qtype).unwrap(),
+            qclass: QClass::from_u16(qclass).unwrap(),
         }
     }
 }
@@ -206,20 +296,16 @@ impl Answer {
         let ttl = buf.get_u32();
         let rdlength = buf.get_u16();
 
-        let mut address = Vec::new();
+        let mut rdata = Vec::new();
 
         for _ in 0..rdlength {
-            address.push(buf.get_u8());
+            rdata.push(buf.get_u8());
         }
-
-        println!("{:?}", address);
-
-        let rdata = vec![];
 
         Self {
             name: DomainName::from_str(&name),
-            rtype,
-            class,
+            rtype: QType::from_u16(rtype).unwrap(),
+            class: QClass::from_u16(class).unwrap(),
             ttl,
             rdlength,
             rdata,
@@ -228,10 +314,10 @@ impl Answer {
 }
 
 impl Message {
-    fn create_query(domain: &str) -> Self {
+    fn create_query(domain: &str, qtype: &str, qclass: &str) -> Self {
         Self {
             header: Header::create_query_header(),
-            question: vec![Question::create_query_question(domain)],
+            question: vec![Question::create_query_question(domain, qtype, qclass)],
             answer: Vec::new(),
             authority: Vec::new(),
             additional: Vec::new(),
@@ -243,7 +329,6 @@ impl Message {
 
         self.header.to_bytes(&mut buf);
 
-        // Questions
         for q in &self.question {
             q.to_bytes(&mut buf);
         }
@@ -264,23 +349,37 @@ impl Message {
             answer.push(Answer::from_bytes(buf));
         }
 
+        let mut authority = vec![];
+        for _ in 0..header.nscount {
+            authority.push(Answer::from_bytes(buf));
+        }
+
+        let mut additional = vec![];
+        for _ in 0..header.nscount {
+            additional.push(Answer::from_bytes(buf));
+        }
+
         Message {
             header,
             question,
             answer,
-            authority: vec![],
-            additional: vec![],
+            authority,
+            additional,
         }
     }
 }
 
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        return Err(Error::new(ErrorKind::Other, "Not enough arguments"));
+    if args.len() < 4 {
+        return Err(Error::other("Not enough arguments"));
     }
 
-    let packet = Message::create_query(args.get(1).unwrap()).to_bytes();
+    let domain = args.get(1).unwrap();
+    let qtype = args.get(2).unwrap();
+    let qclass = args.get(3).unwrap();
+
+    let packet = Message::create_query(domain, qtype, qclass).to_bytes();
 
     let socket = UdpSocket::bind("0.0.0.0:0")?;
 
@@ -291,7 +390,8 @@ fn main() -> std::io::Result<()> {
 
     let mut data = &buf[..len];
 
-    Message::from_bytes(&mut data);
+    let response = Message::from_bytes(&mut data);
+    println!("{:#?}", response);
 
     Ok(())
 }
