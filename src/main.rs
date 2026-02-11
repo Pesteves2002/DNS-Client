@@ -18,11 +18,6 @@ struct Header {
     arcount: u16,
 }
 
-#[derive(Debug, Clone)]
-struct DomainName {
-    labels: Vec<String>,
-}
-
 #[repr(u16)]
 #[derive(Debug, Clone, Copy)]
 pub enum QType {
@@ -51,14 +46,14 @@ pub enum QClass {
 
 #[derive(Debug)]
 struct Question {
-    qname: DomainName,
+    qname: String,
     qtype: QType,
     qclass: QClass,
 }
 
 #[derive(Debug)]
 struct Answer {
-    name: DomainName,
+    name: String,
     rtype: QType,
     class: QClass,
     ttl: u32,
@@ -149,32 +144,6 @@ impl fmt::Display for Header {
     }
 }
 
-impl DomainName {
-    fn from_str(domain: &str) -> Self {
-        let labels = domain.split('.').map(|s| s.to_string()).collect();
-        Self { labels }
-    }
-
-    fn to_bytes(&self, buf: &mut Vec<u8>) {
-        for label in &self.labels {
-            buf.push(label.len() as u8);
-            buf.extend_from_slice(label.as_bytes());
-        }
-
-        buf.push(0); // terminator
-    }
-}
-
-impl fmt::Display for DomainName {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for label in &self.labels {
-            write!(f, "{} ", label)?;
-        }
-
-        Ok(())
-    }
-}
-
 impl QType {
     fn from_str(s: &str) -> Option<Self> {
         match s {
@@ -245,7 +214,7 @@ impl QClass {
 
 impl Question {
     fn create_query_question(domain: &str, typ: &str, class: &str) -> Self {
-        let qname = DomainName::from_str(domain);
+        let qname = domain.to_string();
         let qtype = QType::from_str(typ).unwrap();
         let qclass = QClass::from_str(class).unwrap();
 
@@ -257,13 +226,18 @@ impl Question {
     }
 
     fn to_bytes(&self, buf: &mut Vec<u8>) {
-        self.qname.to_bytes(buf);
+        for label in self.qname.split('.') {
+            buf.push(label.len() as u8);
+            buf.extend_from_slice(label.as_bytes());
+        }
+
+        buf.push(0); // terminator
 
         self.qtype.to_bytes(buf);
         self.qclass.to_bytes(buf);
     }
 
-    fn from_bytes(buf: &mut &[u8], len: usize, labels: &mut HashMap<usize, DomainName>) -> Self {
+    fn from_bytes(buf: &mut &[u8], len: usize, labels: &mut HashMap<usize, String>) -> Self {
         let mut name = String::new();
 
         let index = len - buf.remaining();
@@ -284,7 +258,7 @@ impl Question {
             name.push('.');
         }
 
-        let domain_name = DomainName::from_str(&name);
+        let domain_name = name;
         labels.insert(index, domain_name.clone());
 
         let qtype = buf.get_u16();
@@ -308,7 +282,7 @@ impl fmt::Display for Question {
 }
 
 impl Answer {
-    fn from_bytes(buf: &mut &[u8], len: usize, labels: &mut HashMap<usize, DomainName>) -> Self {
+    fn from_bytes(buf: &mut &[u8], len: usize, labels: &mut HashMap<usize, String>) -> Self {
         let mut name = String::new();
         let mut domain_name = None;
 
@@ -345,9 +319,8 @@ impl Answer {
         }
 
         if domain_name.is_none() {
-            let domain = DomainName::from_str(&name);
-            labels.insert(idx, domain.clone());
-            domain_name = Some(domain);
+            labels.insert(idx, name.clone());
+            domain_name = Some(name);
         }
 
         let rtype = buf.get_u16();
@@ -413,7 +386,7 @@ impl Message {
 
         let header = Header::from_bytes(buf);
 
-        let mut labels: HashMap<usize, DomainName> = HashMap::new();
+        let mut labels: HashMap<usize, String> = HashMap::new();
 
         let mut question = vec![];
         for _ in 0..header.qdcount {
