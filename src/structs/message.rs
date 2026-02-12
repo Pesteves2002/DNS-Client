@@ -25,7 +25,7 @@ impl Message {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(512);
+        let mut buf = Vec::with_capacity(512); // Max UDP Message size
 
         self.header.to_bytes(&mut buf);
 
@@ -101,5 +101,29 @@ impl fmt::Display for Message {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use dns_parser::QueryType;
+
+    use super::*;
+
+    #[test]
+    fn create_query() {
+        let domain = "tomase.pt";
+        let qtype = "A";
+        let qclass = "IN";
+
+        let packet = Message::create_query(domain, qtype, qclass);
+
+        let mut builder = dns_parser::Builder::new_query(packet.header.id, true);
+
+        builder.add_question(domain, false, QueryType::A, dns_parser::QueryClass::IN);
+
+        let reference = builder.build().unwrap();
+
+        assert_eq!(packet.to_bytes(), reference)
     }
 }

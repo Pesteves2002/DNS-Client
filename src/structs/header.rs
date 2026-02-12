@@ -16,16 +16,12 @@ pub struct Header {
 
 impl Header {
     pub fn create_query_header() -> Self {
-        let mut rng = rand::rng();
-
-        let id = rng.random();
+        let id = rand::rng().random();
 
         let mut flags = 0;
-
         flags |= 1 << 8; // RD (recursion desired)
 
         let qdcount = 1; // 1 question
-
         let ancount = 0;
         let nscount = 0;
         let arcount = 0;
