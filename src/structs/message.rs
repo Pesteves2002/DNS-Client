@@ -1,9 +1,7 @@
 use core::fmt;
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use bytes::Buf;
-
-use crate::structs::{answer::Answer, header::Header, question::Question};
+use crate::structs::{Node, answer::Answer, header::Header, question::Question};
 
 pub struct Message {
     pub header: Header, // Always present
@@ -36,32 +34,28 @@ impl Message {
         buf
     }
 
-    pub fn from_bytes(buf: &mut &[u8]) -> Self {
-        let len = buf.remaining();
+    pub fn from_bytes(buf: &[u8], len: usize) -> Self {
+        let mut pointer = &buf[..len];
 
-        let header = Header::from_bytes(buf);
+        let mut nodes: HashMap<usize, Rc<RefCell<Node>>> = HashMap::new();
 
-        let mut labels: HashMap<usize, String> = HashMap::new();
+        let header = Header::from_bytes(&mut pointer);
 
-        let mut question = vec![];
-        for _ in 0..header.qdcount {
-            question.push(Question::from_bytes(buf, len, &mut labels));
-        }
+        let question = (0..header.qdcount)
+            .map(|_| Question::from_bytes(&mut pointer, len, &mut nodes))
+            .collect();
 
-        let mut answer = vec![];
-        for _ in 0..header.ancount {
-            answer.push(Answer::from_bytes(buf, len, &mut labels));
-        }
+        let answer = (0..header.ancount)
+            .map(|_| Answer::from_bytes(&mut pointer, len, &mut nodes))
+            .collect();
 
-        let mut authority = vec![];
-        for _ in 0..header.nscount {
-            authority.push(Answer::from_bytes(buf, len, &mut labels));
-        }
+        let authority = (0..header.nscount)
+            .map(|_| Answer::from_bytes(&mut pointer, len, &mut nodes))
+            .collect();
 
-        let mut additional = vec![];
-        for _ in 0..header.nscount {
-            additional.push(Answer::from_bytes(buf, len, &mut labels));
-        }
+        let additional = (0..header.arcount)
+            .map(|_| Answer::from_bytes(&mut pointer, len, &mut nodes))
+            .collect();
 
         Message {
             header,

@@ -25,9 +25,7 @@ fn main() -> std::io::Result<()> {
     let mut buf = [0u8; 512];
     let (len, _) = socket.recv_from(&mut buf)?;
 
-    let mut data = &buf[..len];
-
-    let response = Message::from_bytes(&mut data);
+    let response = Message::from_bytes(&buf, len);
     println!("{}", response);
 
     Ok(())

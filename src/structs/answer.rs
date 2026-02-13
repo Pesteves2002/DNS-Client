@@ -1,9 +1,10 @@
 use core::fmt;
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use bytes::Buf;
 
 use crate::structs::{
+    Node,
     question::{QClass, QType},
     read_label,
 };
@@ -58,10 +59,14 @@ pub struct Answer {
 }
 
 impl Answer {
-    pub fn from_bytes(buf: &mut &[u8], len: usize, labels: &mut HashMap<usize, String>) -> Self {
-        let index = len - buf.len();
+    pub fn from_bytes(
+        buf: &mut &[u8],
+        len: usize,
+        nodes: &mut HashMap<usize, Rc<RefCell<Node>>>,
+    ) -> Self {
+        let index = len - buf.remaining();
 
-        let qname = read_label(buf, index, labels).unwrap();
+        let qname = read_label(buf, index, nodes).unwrap();
         let rtype = buf.get_u16();
         let rtype = QType::from_u16(rtype).unwrap();
 
@@ -106,9 +111,8 @@ impl Answer {
             }
 
             QType::CNAME | QType::NS => {
-                let index = len - buf.len();
-
-                let name = read_label(buf, index, labels).unwrap();
+                let index = len - buf.remaining();
+                let name = read_label(buf, index, nodes).unwrap();
 
                 RDATA::DomainName(name)
             }
@@ -116,9 +120,8 @@ impl Answer {
             QType::MX => {
                 let pref = buf.get_u16();
 
-                let index = len - buf.len();
-
-                let name = read_label(buf, index, labels).unwrap();
+                let index = len - buf.remaining();
+                let name = read_label(buf, index, nodes).unwrap();
 
                 RDATA::MX(pref, name)
             }
