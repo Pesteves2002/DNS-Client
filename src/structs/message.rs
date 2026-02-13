@@ -1,5 +1,5 @@
 use core::fmt;
-use std::collections::HashMap;
+use std::{collections::HashMap, error::Error};
 
 use crate::structs::{answer::Answer, header::Header, question::Question};
 
@@ -12,14 +12,14 @@ pub struct Message {
 }
 
 impl Message {
-    pub fn create_query(domain: &str, qtype: &str, qclass: &str) -> Self {
-        Self {
+    pub fn create_query(domain: &str, qtype: &str, qclass: &str) -> Result<Self, Box<dyn Error>> {
+        Ok(Self {
             header: Header::create_query_header(),
-            question: vec![Question::create_query_question(domain, qtype, qclass)],
+            question: vec![Question::create_query_question(domain, qtype, qclass)?],
             answer: Vec::new(),
             authority: Vec::new(),
             additional: Vec::new(),
-        }
+        })
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -34,36 +34,35 @@ impl Message {
         buf
     }
 
-    pub fn from_bytes(buf: &[u8], len: usize) -> Self {
+    pub fn from_bytes(buf: &[u8], len: usize) -> Result<Self, Box<dyn Error>> {
         let mut pointer = &buf[..len];
-
         let mut nodes = HashMap::new();
 
         let header = Header::from_bytes(&mut pointer);
 
         let question = (0..header.qdcount)
             .map(|_| Question::from_bytes(&mut pointer, len, &mut nodes))
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
 
         let answer = (0..header.ancount)
             .map(|_| Answer::from_bytes(&mut pointer, len, &mut nodes))
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
 
         let authority = (0..header.nscount)
             .map(|_| Answer::from_bytes(&mut pointer, len, &mut nodes))
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
 
         let additional = (0..header.arcount)
             .map(|_| Answer::from_bytes(&mut pointer, len, &mut nodes))
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
 
-        Message {
+        Ok(Message {
             header,
             question,
             answer,
             authority,
             additional,
-        }
+        })
     }
 }
 
@@ -110,7 +109,7 @@ mod tests {
         let qtype = "A";
         let qclass = "IN";
 
-        let packet = Message::create_query(domain, qtype, qclass);
+        let packet = Message::create_query(domain, qtype, qclass).unwrap();
 
         let mut builder = dns_parser::Builder::new_query(packet.header.id, true);
 

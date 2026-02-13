@@ -1,11 +1,37 @@
 use core::fmt;
-use std::collections::HashMap;
+use std::{collections::HashMap, error::Error, str::FromStr};
 
 use crate::structs::{RefNode, read_label};
 
 use super::write_u16;
 
 use bytes::Buf;
+
+#[derive(Debug)]
+pub struct ParseQTypeError {
+    pub value: String,
+}
+
+impl fmt::Display for ParseQTypeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Invalid qtype: {}", self.value)
+    }
+}
+
+impl std::error::Error for ParseQTypeError {}
+
+#[derive(Debug)]
+pub struct ParseQClassError {
+    pub value: String,
+}
+
+impl fmt::Display for ParseQClassError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Invalid qclass: {}", self.value)
+    }
+}
+
+impl std::error::Error for ParseQClassError {}
 
 #[repr(u16)]
 #[derive(Debug, Clone, Copy)]
@@ -36,28 +62,36 @@ pub struct Question {
     qclass: QClass,
 }
 
-impl QType {
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for QType {
+    type Err = ParseQTypeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "A" => Some(Self::A),
-            "NS" => Some(Self::NS),
-            "CNAME" => Some(Self::CNAME),
-            "MX" => Some(Self::MX),
-            "TXT" => Some(Self::TXT),
-            "AAAA" => Some(Self::AAAA),
-            _ => None,
+            "A" => Ok(Self::A),
+            "NS" => Ok(Self::NS),
+            "CNAME" => Ok(Self::CNAME),
+            "MX" => Ok(Self::MX),
+            "TXT" => Ok(Self::TXT),
+            "AAAA" => Ok(Self::AAAA),
+            _ => Err(ParseQTypeError {
+                value: s.to_string(),
+            }),
         }
     }
+}
 
-    pub fn from_u16(value: u16) -> Option<Self> {
+impl QType {
+    pub fn from_u16(value: u16) -> Result<Self, ParseQTypeError> {
         match value {
-            1 => Some(Self::A),
-            2 => Some(Self::NS),
-            5 => Some(Self::CNAME),
-            15 => Some(Self::MX),
-            16 => Some(Self::TXT),
-            28 => Some(Self::AAAA),
-            _ => None,
+            1 => Ok(Self::A),
+            2 => Ok(Self::NS),
+            5 => Ok(Self::CNAME),
+            15 => Ok(Self::MX),
+            16 => Ok(Self::TXT),
+            28 => Ok(Self::AAAA),
+            _ => Err(ParseQTypeError {
+                value: value.to_string(),
+            }),
         }
     }
 
@@ -66,26 +100,34 @@ impl QType {
     }
 }
 
-impl QClass {
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for QClass {
+    type Err = ParseQClassError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "IN" => Some(Self::IN),
-            "CS" => Some(Self::CS),
-            "CH" => Some(Self::CH),
-            "HS" => Some(Self::HS),
-            "ANY" => Some(Self::ANY),
-            _ => None,
+            "IN" => Ok(Self::IN),
+            "CS" => Ok(Self::CS),
+            "CH" => Ok(Self::CH),
+            "HS" => Ok(Self::HS),
+            "ANY" => Ok(Self::ANY),
+            _ => Err(ParseQClassError {
+                value: s.to_string(),
+            }),
         }
     }
+}
 
-    pub fn from_u16(value: u16) -> Option<Self> {
+impl QClass {
+    pub fn from_u16(value: u16) -> Result<Self, ParseQClassError> {
         match value {
-            1 => Some(Self::IN),
-            2 => Some(Self::CS),
-            3 => Some(Self::CH),
-            4 => Some(Self::HS),
-            255 => Some(Self::ANY),
-            _ => None,
+            1 => Ok(Self::IN),
+            2 => Ok(Self::CS),
+            3 => Ok(Self::CH),
+            4 => Ok(Self::HS),
+            255 => Ok(Self::ANY),
+            _ => Err(ParseQClassError {
+                value: value.to_string(),
+            }),
         }
     }
 
@@ -95,26 +137,31 @@ impl QClass {
 }
 
 impl Question {
-    pub fn create_query_question(domain: &str, typ: &str, class: &str) -> Self {
+    pub fn create_query_question(
+        domain: &str,
+        typ: &str,
+        class: &str,
+    ) -> Result<Self, Box<dyn Error>> {
         let qname = domain.trim().to_string();
-        let qtype = QType::from_str(typ).unwrap();
-        let qclass = QClass::from_str(class).unwrap();
+        let qtype = QType::from_str(typ)?;
+        let qclass = QClass::from_str(class)?;
 
-        Question {
+        Ok(Question {
             qname,
             qtype,
             qclass,
-        }
+        })
     }
 
     // Each label is written as follows:
     // [ LEN ][         CHARS         ]
     //
     // When finished terminate with a single 0:
-    // [0]
+    // [  0  ]
     //
     // e.g.
     // [  6  ]['t' 'o' 'm' 'a' 's' 'e']
+    // [  0  ]
     pub fn to_bytes(&self, buf: &mut Vec<u8>) {
         for label in self.qname.split('.') {
             buf.push(label.len() as u8);
@@ -127,18 +174,22 @@ impl Question {
         self.qclass.to_bytes(buf);
     }
 
-    pub fn from_bytes(buf: &mut &[u8], len: usize, nodes: &mut HashMap<usize, RefNode>) -> Self {
+    pub fn from_bytes(
+        buf: &mut &[u8],
+        len: usize,
+        nodes: &mut HashMap<usize, RefNode>,
+    ) -> Result<Self, Box<dyn Error>> {
         let index = len - buf.remaining();
 
-        let qname = read_label(buf, index, nodes).unwrap();
-        let qtype = buf.get_u16();
-        let qclass = buf.get_u16();
+        let qname = read_label(buf, index, nodes)?;
+        let qtype = QType::from_u16(buf.get_u16())?;
+        let qclass = QClass::from_u16(buf.get_u16())?;
 
-        Self {
+        Ok(Self {
             qname,
-            qtype: QType::from_u16(qtype).unwrap(),
-            qclass: QClass::from_u16(qclass).unwrap(),
-        }
+            qtype,
+            qclass,
+        })
     }
 }
 

@@ -1,5 +1,5 @@
 use core::fmt;
-use std::collections::HashMap;
+use std::{collections::HashMap, error::Error};
 
 use bytes::Buf;
 
@@ -59,14 +59,17 @@ pub struct Answer {
 }
 
 impl Answer {
-    pub fn from_bytes(buf: &mut &[u8], len: usize, nodes: &mut HashMap<usize, RefNode>) -> Self {
+    pub fn from_bytes(
+        buf: &mut &[u8],
+        len: usize,
+        nodes: &mut HashMap<usize, RefNode>,
+    ) -> Result<Self, Box<dyn Error>> {
         let index = len - buf.remaining();
 
-        let qname = read_label(buf, index, nodes).unwrap();
-        let rtype = buf.get_u16();
-        let rtype = QType::from_u16(rtype).unwrap();
+        let qname = read_label(buf, index, nodes)?;
+        let rtype = QType::from_u16(buf.get_u16())?;
 
-        let class = buf.get_u16();
+        let class = QClass::from_u16(buf.get_u16())?;
         let ttl = buf.get_u32();
         let rdlength = buf.get_u16();
 
@@ -108,7 +111,7 @@ impl Answer {
 
             QType::CNAME | QType::NS => {
                 let index = len - buf.remaining();
-                let name = read_label(buf, index, nodes).unwrap();
+                let name = read_label(buf, index, nodes)?;
 
                 RDATA::DomainName(name)
             }
@@ -117,20 +120,20 @@ impl Answer {
                 let pref = buf.get_u16();
 
                 let index = len - buf.remaining();
-                let name = read_label(buf, index, nodes).unwrap();
+                let name = read_label(buf, index, nodes)?;
 
                 RDATA::MX(pref, name)
             }
         };
 
-        Self {
+        Ok(Self {
             name: qname,
             rtype,
-            class: QClass::from_u16(class).unwrap(),
+            class,
             ttl,
             rdlength,
             rdata,
-        }
+        })
     }
 }
 

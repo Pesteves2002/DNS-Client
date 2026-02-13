@@ -1,3 +1,4 @@
+use core::fmt;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use bytes::Buf;
@@ -7,6 +8,19 @@ pub mod message;
 mod answer;
 mod header;
 mod question;
+
+#[derive(Debug)]
+pub struct ParseLabelError {
+    pub value: String,
+}
+
+impl fmt::Display for ParseLabelError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Invalid label: {}", self.value)
+    }
+}
+
+impl std::error::Error for ParseLabelError {}
 
 fn write_u16(buf: &mut Vec<u8>, v: u16) {
     buf.extend_from_slice(&v.to_be_bytes());
@@ -40,7 +54,7 @@ fn read_label(
     buf: &mut &[u8],
     mut index: usize,
     nodes: &mut HashMap<usize, RefNode>,
-) -> Option<String> {
+) -> Result<String, ParseLabelError> {
     let mut head: Option<RefNode> = None;
     let mut prev: Option<RefNode> = None;
 
@@ -64,7 +78,11 @@ fn read_label(
                     }
                 }
 
-                None => return None,
+                None => {
+                    return Err(ParseLabelError {
+                        value: "No entry on nodes".to_string(),
+                    });
+                }
             }
 
             break;
@@ -96,5 +114,11 @@ fn read_label(
         index += 1 + len as usize
     }
 
-    head.map(|node| node.borrow().get_full_label())
+    if head.is_none() {
+        return Err(ParseLabelError {
+            value: "No head detected".to_string(),
+        });
+    }
+
+    Ok(head.unwrap().borrow().get_full_label())
 }
