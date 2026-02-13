@@ -1,7 +1,7 @@
 use core::fmt;
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::collections::HashMap;
 
-use crate::structs::{Node, read_label};
+use crate::structs::{RefNode, read_label};
 
 use super::write_u16;
 
@@ -127,11 +127,7 @@ impl Question {
         self.qclass.to_bytes(buf);
     }
 
-    pub fn from_bytes(
-        buf: &mut &[u8],
-        len: usize,
-        nodes: &mut HashMap<usize, Rc<RefCell<Node>>>,
-    ) -> Self {
+    pub fn from_bytes(buf: &mut &[u8], len: usize, nodes: &mut HashMap<usize, RefNode>) -> Self {
         let index = len - buf.remaining();
 
         let qname = read_label(buf, index, nodes).unwrap();

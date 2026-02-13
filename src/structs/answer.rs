@@ -1,10 +1,10 @@
 use core::fmt;
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::collections::HashMap;
 
 use bytes::Buf;
 
 use crate::structs::{
-    Node,
+    RefNode,
     question::{QClass, QType},
     read_label,
 };
@@ -59,11 +59,7 @@ pub struct Answer {
 }
 
 impl Answer {
-    pub fn from_bytes(
-        buf: &mut &[u8],
-        len: usize,
-        nodes: &mut HashMap<usize, Rc<RefCell<Node>>>,
-    ) -> Self {
+    pub fn from_bytes(buf: &mut &[u8], len: usize, nodes: &mut HashMap<usize, RefNode>) -> Self {
         let index = len - buf.remaining();
 
         let qname = read_label(buf, index, nodes).unwrap();

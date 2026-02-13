@@ -1,7 +1,7 @@
 use core::fmt;
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::collections::HashMap;
 
-use crate::structs::{Node, answer::Answer, header::Header, question::Question};
+use crate::structs::{answer::Answer, header::Header, question::Question};
 
 pub struct Message {
     pub header: Header, // Always present
@@ -37,7 +37,7 @@ impl Message {
     pub fn from_bytes(buf: &[u8], len: usize) -> Self {
         let mut pointer = &buf[..len];
 
-        let mut nodes: HashMap<usize, Rc<RefCell<Node>>> = HashMap::new();
+        let mut nodes = HashMap::new();
 
         let header = Header::from_bytes(&mut pointer);
 
