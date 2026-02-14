@@ -9,20 +9,40 @@ use crate::structs::{
     read_label,
 };
 
+#[derive(Debug, Clone)]
+struct DomainName(String);
+
+impl From<String> for DomainName {
+    fn from(s: String) -> Self {
+        DomainName(s)
+    }
+}
+
+impl fmt::Display for DomainName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Debug)]
 #[allow(clippy::upper_case_acronyms)]
 enum RDATA {
-    DomainName(String), // CNAME, NS, PTR
-    IPV4([u8; 4]),      // A
-    IPV6([u8; 16]),     // AAAA
-    TXT(String),        // TXT
-    MX(u16, String),    // MX
+    DomainName(DomainName), // CNAME, NS, PTR
+    IPV4([u8; 4]),          // A
+    IPV6([u8; 16]),         // AAAA
+    TXT(String),            // TXT
+    MX(u16, String),        // MX
+    SOA(DomainName, DomainName, u32, u32, u32, u32, u32),
 }
 
 impl fmt::Display for RDATA {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::DomainName(s) | Self::TXT(s) => {
+            Self::DomainName(s) => {
+                writeln!(f, "{s}")?;
+            }
+
+            Self::TXT(s) => {
                 writeln!(f, "{s}")?;
             }
 
@@ -42,6 +62,17 @@ impl fmt::Display for RDATA {
                     let segment = ((ip[2 * i] as u16) << 8) | ip[2 * i + 1] as u16;
                     write!(f, "{:x}", segment)?;
                 }
+            }
+
+            Self::SOA(mname, rname, serial, refresh, retry, expire, minimum) => {
+                writeln!(f)?;
+                writeln!(f, "MNAME: {mname}")?;
+                writeln!(f, "RNAME: {rname}")?;
+                writeln!(f, "SERIAL: {serial}")?;
+                writeln!(f, "REFRESH: {refresh}")?;
+                writeln!(f, "RETRY: {retry}")?;
+                writeln!(f, "EXPIRE: {expire}")?;
+                writeln!(f, "MINIMUM: {minimum}")?;
             }
         };
 
@@ -113,7 +144,7 @@ impl Answer {
                 let index = len - buf.remaining();
                 let name = read_label(buf, index, nodes)?;
 
-                RDATA::DomainName(name)
+                RDATA::DomainName(DomainName::from(name))
             }
 
             QType::MX => {
@@ -123,6 +154,30 @@ impl Answer {
                 let name = read_label(buf, index, nodes)?;
 
                 RDATA::MX(pref, name)
+            }
+
+            QType::SOA => {
+                let index = len - buf.remaining();
+                let mname = read_label(buf, index, nodes)?;
+
+                let index = len - buf.remaining();
+                let rname = read_label(buf, index, nodes)?;
+
+                let serial = buf.get_u32();
+                let refresh = buf.get_u32();
+                let retry = buf.get_u32();
+                let expire = buf.get_u32();
+                let minimum = buf.get_u32();
+
+                RDATA::SOA(
+                    DomainName::from(mname),
+                    DomainName::from(rname),
+                    serial,
+                    refresh,
+                    retry,
+                    expire,
+                    minimum,
+                )
             }
         };
 
